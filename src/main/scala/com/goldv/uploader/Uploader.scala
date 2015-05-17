@@ -1,10 +1,15 @@
 package com.goldv.uploader
 
+import java.io.File
 import java.util.concurrent.{TimeUnit, Executors}
 
 import com.amazonaws.auth.AWSCredentials
 import com.goldv.uploader.download.URLDownloader
 import com.goldv.uploader.s3.S3Uploader
+import com.typesafe.config.ConfigFactory
+import org.slf4j.LoggerFactory
+import scala.collection.JavaConversions._
+
 
 import scala.concurrent.ExecutionContext.Implicits.global
 
@@ -13,26 +18,31 @@ import scala.concurrent.ExecutionContext.Implicits.global
  */
 object Uploader extends App{
 
-  val bucket = "felsenegg-cam"
+  val log = LoggerFactory.getLogger(Uploader.getClass)
+  val config = ConfigFactory.parseFile(new File(args(0)))
+
+  val bucket = config.getString("bucket")
+  val interval = config.getDuration("interval", TimeUnit.MINUTES)
 
   val scheduler = Executors.newSingleThreadScheduledExecutor()
 
+
   val credentials = new AWSCredentials{
-    def getAWSAccessKeyId = args(0)
-    def getAWSSecretKey = args(1)
+    def getAWSAccessKeyId = config.getConfig("aws").getString("public-key")
+    def getAWSSecretKey = config.getConfig("aws").getString("secret-key")
   }
 
 
   val runnable = new Runnable {
     override def run() = {
-      val downloader = new URLDownloader( List ("http://www.felsenegg.com/cam/cam02.jpg","http://www.felsenegg.com/cam/cam01.jpg") )
+      val downloader = new URLDownloader( config.getStringList("urls").toList )
 
       val uploader = new S3Uploader(credentials)
 
       downloader.download.foreach{ inputs =>
         inputs.zipWithIndex.foreach{ case (input, idx) =>
           val name = s"cam$idx.jpg"
-          println(s"Uploading $name")
+          log.info(s"Uploading $name")
           uploader.upload(bucket,name, input )
         }
 
@@ -40,6 +50,6 @@ object Uploader extends App{
     }
   }
 
-  scheduler.scheduleAtFixedRate(runnable, 0, 1, TimeUnit.MINUTES)
+  scheduler.scheduleAtFixedRate(runnable, 0, interval, TimeUnit.MINUTES)
 
 }
